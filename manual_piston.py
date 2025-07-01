@@ -1,4 +1,5 @@
 import cv2
+import serial
 import numpy as np
 from pypylon import pylon
 from pymodbus.client import ModbusTcpClient 
@@ -61,9 +62,16 @@ ENCODER_REGISTER = 24575
 SERVER_IP = '192.168.100.2'
 SERVER_PORT = 502
 SLAVE_ID = 255
+
 period_reg = 16395
 period_val = 200
 #period_val = 0
+
+encoder_reg = 16394
+encoder_value = 0
+
+SERIAL_PORT = '/dev/ttyTHS1'
+BAUD_RATE = 9600
 
 def init_camera():
     camera = pylon.InstantCamera(pylon.TlFactory.GetInstance().CreateFirstDevice())
@@ -123,18 +131,29 @@ if __name__ == '__main__':
     camera = init_camera()
     grace_counter = 0
 
+    ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
+    time.sleep(2)  # wait for Arduino to reset
+    print("Connected to Arduino")
+
     if client.connect():
         print("Connected to Modbus server")
 
         try:
             while camera.IsGrabbing():
-                encoder_value = client.read_input_registers(ENCODER_REGISTER, slave=SLAVE_ID).registers[0]
+
+
+                client.write_register(encoder_reg, encoder_value, slave=SLAVE_ID)
+
                 # Write motor speeds
                 for name, speed in MOTOR_SPEEDS.items():
                     client.write_register(CONTROL_REGISTERS[name], speed, slave=SLAVE_ID)
 
                 client.write_register(period_reg, period_val + 1, slave=SLAVE_ID)
                 client.write_register(period_reg, period_val, slave=SLAVE_ID)
+
+                line = ser.readline().decode('utf-8').strip()
+                if line.isdigit():
+                    encoder_value = int(line)
 
                 piston = input("Piston to fire: ")
                 if piston == '1':
@@ -169,7 +188,6 @@ if __name__ == '__main__':
                     roi = img[ROI[2]:ROI[3], ROI[0]:ROI[1]]
                     hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
 
-
                     detected_color = None
                     if grace_counter == 0:
                         current_detection = classify_color(hsv)
@@ -187,8 +205,7 @@ if __name__ == '__main__':
                         grace_counter -= 1
 
                     # Overlay text for visual debugging
-                    text = f"{index} | {last_detection if last_detection else 'Waiting...'}"
-                    cv2.putText(roi, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+                    #cv2.putText(roi, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
                     cv2.imshow("Scrap Detector", roi)
 
                     if cv2.waitKey(1) & 0xFF == ord('q'):
